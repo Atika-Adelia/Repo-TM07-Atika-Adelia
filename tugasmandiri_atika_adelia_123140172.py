@@ -313,3 +313,23 @@ dist = pd.concat({"latih": train_df.groupBy("label").count().toPandas().set_inde
                   "uji": test_df.groupBy("label").count().toPandas().set_index("label")["count"]}, axis=1)
 print("\nDistribusi kelas per subset:")
 display(dist)
+
+"""## 9. Model GBT baseline
+
+Konfigurasi persis seperti kode pada Gambar 7 artikel: `GBTClassifier(labelCol='label', maxIter=75, maxDepth=3)`; 
+parameter lain memakai nilai bawaan Spark (`stepSize=0.1`, `maxBins=32`, *loss* logistik).
+
+Catatan: kode GBT pada Gambar 7 tidak menyebut `featuresCol`, jadi artikel memakai kolom bawaan 
+`features` (tanpa penskalaan), sedangkan model lain memakai `features_scaled`. Di sini GBT memakai `features_scaled`; 
+karena pohon tidak terpengaruh skala, hasilnya setara.
+"""
+
+gbt = GBTClassifier(featuresCol="features_scaled", labelCol="label", seed=SEED, **GBT_BASE)
+
+t0 = time.perf_counter()
+gbt_model = gbt.fit(train_df)
+timings["gbt_baseline_fit_s"] = time.perf_counter() - t0
+
+print(f"Parameter  : maxIter={gbt.getMaxIter()}, maxDepth={gbt.getMaxDepth()}, stepSize={gbt.getStepSize()}")
+print(f"Jumlah pohon pada ensemble : {len(gbt_model.trees)}")
+print(f"Waktu pelatihan            : {timings['gbt_baseline_fit_s']:.1f} detik")
