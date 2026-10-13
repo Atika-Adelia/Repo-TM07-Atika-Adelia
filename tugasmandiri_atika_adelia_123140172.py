@@ -333,3 +333,87 @@ timings["gbt_baseline_fit_s"] = time.perf_counter() - t0
 print(f"Parameter  : maxIter={gbt.getMaxIter()}, maxDepth={gbt.getMaxDepth()}, stepSize={gbt.getStepSize()}")
 print(f"Jumlah pohon pada ensemble : {len(gbt_model.trees)}")
 print(f"Waktu pelatihan            : {timings['gbt_baseline_fit_s']:.1f} detik")
+
+"""## 10. Evaluasi model baseline
+
+Metrik mengikuti artikel (persamaan 1–4), dengan kelas positif = `cardio` 1:
+
+$$Accuracy = \frac{TP+TN}{TP+FP+TN+FN} \qquad Precision = \frac{TP}{TP+FP} \qquad Recall = 
+\frac{TP}{TP+FN} \qquad F1 = \frac{2}{\frac{1}{Recall}+\frac{1}{Precision}}$$
+
+AUC-ROC dihitung dengan `BinaryClassificationEvaluator`
+"""
+
+# Menghitung metrik
+def metrics_from_cm(cm: np.ndarray) -> dict:
+    tn, fp, fn, tp = (int(v) for v in np.asarray(cm).ravel())
+    accuracy = (tp + tn) / (tp + tn + fp + fn)
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {"tn": tn, "fp": fp, "fn": fn, "tp": tp,
+            "accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
+
+
+# Evaluasi Model
+def evaluate_model(model, data):
+    pred = model.transform(data).cache()
+
+    auc_roc = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="rawPrediction",
+                                            metricName="areaUnderROC").evaluate(pred)
+    auc_pr = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="rawPrediction",
+                                           metricName="areaUnderPR").evaluate(pred)
+
+    cm = np.zeros((2, 2), dtype=int)
+    for row in pred.groupBy("label", "prediction").count().collect():
+        cm[int(row["label"]), int(row["prediction"])] = int(row["count"])
+
+    m = metrics_from_cm(cm)
+    m.update({"auc_roc": auc_roc, "auc_pr": auc_pr, "n": int(cm.sum())})
+
+    # Cek silang akurasi dengan evaluator bawaan Spark
+    acc_spark = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction",
+                                                  metricName="accuracy").evaluate(pred)
+    assert abs(acc_spark - m["accuracy"]) < 1e-9, "Akurasi dari confusion matrix berbeda dari evaluator Spark"
+    return m, pred
+
+
+def print_report(name, m):
+    print(f"=== {name} ===")
+    print(f"Test Area Under ROC : {m['auc_roc']:.4f}")
+    print(f"Area Under PR       : {m['auc_pr']:.4f}")
+    print(f"Accuracy            : {m['accuracy']:.4f}")
+    print(f"Precision           : {m['precision']:.4f}")
+    print(f"Recall              : {m['recall']:.4f}")
+    print(f"F1-score            : {m['f1']:.4f}")
+    print(f"Confusion matrix    : [[{m['tn']}, {m['fp']}], [{m['fn']}, {m['tp']}]]   (n = {m['n']:,})")
+
+# Gambar confusion matrix dan kurva ROC
+def plot_diagnostics(pred, m, title):
+    cm = np.array([[m["tn"], m["fp"]], [m["fn"], m["tp"]]])
+    roc_pdf = pred.select("label", vector_to_array("probability")[1].alias("p1")).toPandas()
+    fpr, tpr, _ = roc_curve(roc_pdf["label"], roc_pdf["p1"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.3))
+    ax = axes[0]
+    ax.imshow(cm, cmap="Blues")
+    ax.set_xticks([0, 1]); ax.set_yticks([0, 1])
+    ax.set_xticklabels(["0 (sehat)", "1 (kardio)"]); ax.set_yticklabels(["0 (sehat)", "1 (kardio)"])
+    ax.set_xlabel("Prediksi"); ax.set_ylabel("Aktual"); ax.set_title(f"Confusion matrix: {title}")
+    for i in range(2):
+        for j in range(2):
+            ax.text(j, i, f"{cm[i, j]:,}", ha="center", va="center", fontsize=13,
+                    color="white" if cm[i, j] > cm.max() / 2 else "black")
+
+    ax = axes[1]
+    ax.plot(fpr, tpr, lw=2, label=f"AUC (Spark) = {m['auc_roc']:.4f}")
+    ax.plot([0, 1], [0, 1], "--", color="gray", label="Acak")
+    ax.set_xlabel("False positive rate"); ax.set_ylabel("True positive rate")
+    ax.set_title(f"Kurva ROC: {title}"); ax.legend(loc="lower right")
+    plt.tight_layout()
+    plt.show()
+
+# 10.1 Evaluasi GBT baseline pada data uji
+metrics_base, pred_base = evaluate_model(gbt_model, test_df)
+print_report("GBT baseline (maxIter=75, maxDepth=3)", metrics_base)
+plot_diagnostics(pred_base, metrics_base, "GBT baseline")
