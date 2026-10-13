@@ -200,3 +200,64 @@ ax.set_title("Distribusi kelas target")
 
 plt.tight_layout()
 plt.show()
+
+"""## 6. Pembersihan data
+
+Artikel menyatakan tiga langkah: (1) membuang kolom `id` karena tidak relevan, (2) membuang baris duplikat, 
+dan (3) "mengganti nilai yang aneh" (*replaced the strange value*). Langkah (3) **tidak dirinci** pada artikel, 
+sehingga saya mendefinisikannya sebagai berikut **[asumsi]**:
+
+Nilai di luar rentang **diganti dengan median** kolom tersebut (`OUTLIER_STRATEGY = "median"`, sesuai kata "replaced"), atau barisnya dibuang bila `OUTLIER_STRATEGY = "drop"`. 
+Selain itu, baris dengan `ap_hi < ap_lo` (diastolik lebih besar dari sistolik, kemungkinan tertukar saat input) diperbaiki dengan menukar keduanya.
+"""
+
+VALID_RANGES = {"height": (120, 220), "weight": (30, 200), "ap_hi": (70, 250), "ap_lo": (40, 200)}
+
+# 6.1 Buang kolom id, samakan tipe data menjadi double
+df = df_raw.drop("id")
+df = df.select([F.col(c).cast("double").alias(c) for c in df.columns])
+
+# 6.2 Buang baris duplikat
+n_before_dedup = df.count()
+df = df.dropDuplicates()
+n_dupes = n_before_dedup - df.count()
+
+# 6.3 Hitung nilai di luar rentang (sebelum diperbaiki)
+invalid_counts = df.select(
+    [F.sum((~F.col(c).between(lo, hi)).cast("int")).alias(c) for c, (lo, hi) in VALID_RANGES.items()]
+).toPandas().iloc[0].to_dict()
+n_bp_inverted = df.filter(F.col("ap_hi") < F.col("ap_lo")).count()
+
+# 6.4 Tangani nilai tak wajar
+if OUTLIER_STRATEGY == "median":
+    medians = {}
+    for c, (lo, hi) in VALID_RANGES.items():
+        medians[c] = df.filter(F.col(c).between(lo, hi)).approxQuantile(c, [0.5], 0.001)[0]
+        df = df.withColumn(c, F.when(F.col(c).between(lo, hi), F.col(c)).otherwise(F.lit(medians[c])))
+    print("Median pengganti:", medians)
+elif OUTLIER_STRATEGY == "drop":
+    valid_all = reduce(lambda a, b: a & b, [F.col(c).between(lo, hi) for c, (lo, hi) in VALID_RANGES.items()])
+    df = df.filter(valid_all)
+else:
+    raise ValueError("OUTLIER_STRATEGY harus 'median' atau 'drop'")
+
+# 6.5 Perbaiki tekanan darah tertukar
+df = (df.withColumn("_hi", F.greatest("ap_hi", "ap_lo"))
+        .withColumn("_lo", F.least("ap_hi", "ap_lo"))
+        .drop("ap_hi", "ap_lo")
+        .withColumnRenamed("_hi", "ap_hi")
+        .withColumnRenamed("_lo", "ap_lo"))
+
+df_clean = df.cache()
+n_clean = df_clean.count()
+
+print(f"\nBaris Sebelum pembersihan        : {n_raw:,}")
+print(f"Baris duplikat dibuang             : {n_dupes:,}")
+print(f"Nilai di luar rentang (sebelum)    : {invalid_counts}")
+print(f"Baris ap_hi < ap_lo (sebelum)      : {n_bp_inverted:,}")
+print(f"Strategi                           : {OUTLIER_STRATEGY}")
+print(f"Baris setelah pembersihan          : {n_clean:,}")
+
+# 6.6 Verifikasi: rentang setelah pembersihan
+display(df_clean.select("height", "weight", "ap_hi", "ap_lo").summary("min", "50%", "max").toPandas())
+print("Masih ada ap_hi < ap_lo? ->", df_clean.filter(F.col("ap_hi") < F.col("ap_lo")).count(), "baris")
