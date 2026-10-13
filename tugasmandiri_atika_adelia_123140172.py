@@ -261,3 +261,36 @@ print(f"Baris setelah pembersihan          : {n_clean:,}")
 # 6.6 Verifikasi: rentang setelah pembersihan
 display(df_clean.select("height", "weight", "ap_hi", "ap_lo").summary("min", "50%", "max").toPandas())
 print("Masih ada ap_hi < ap_lo? ->", df_clean.filter(F.col("ap_hi") < F.col("ap_lo")).count(), "baris")
+
+"""## 7. Praproses data 
+
+Artikel menyebut: *feature extraction* untuk membuat fitur baru, lalu `VectorAssembler` untuk mengubah fitur menjadi vektor, kemudian `StandardScaler`. Fitur baru tidak dirinci, sehingga saya membuat dua fitur turunan yang lazim pada data ini **[asumsi]**:
+
+- `age_years` = `age` (hari) / 365,25, dibulatkan ke bawah (kolom `age` dalam hari lalu dibuang karena redundan);
+- `bmi` = `weight` / (`height` / 100)².
+
+Kolom target `cardio` dinamai `label` (sesuai `labelCol="label"` pada kode artikel). `StandardScaler` memakai pengaturan bawaan Spark (`withStd=True`, `withMean=False`).
+
+> Urutan pada artikel (Gambar 2) adalah praproses **dahulu**, baru pembagian latih/uji; notebook ini mengikuti urutan tersebut. Untuk model berbasis pohon seperti GBT, penskalaan tidak mengubah hasil (pohon invarian terhadap transformasi monoton), sehingga tidak ada kebocoran data yang berarti dari langkah ini.
+"""
+
+FEATURE_COLS = ["age_years", "gender", "height", "weight", "ap_hi", "ap_lo",
+                "cholesterol", "gluc", "smoke", "alco", "active", "bmi"]
+
+# 7.1 Feature extraction
+df_fe = (df_clean
+         .withColumn("age_years", F.floor(F.col("age") / 365.25))
+         .withColumn("bmi", F.col("weight") / F.pow(F.col("height") / 100.0, 2))
+         .drop("age")
+         .withColumnRenamed("cardio", "label"))
+
+# 7.2 VectorAssembler ke StandardScaler
+assembler = VectorAssembler(inputCols=FEATURE_COLS, outputCol="features")
+scaler = StandardScaler(inputCol="features", outputCol="features_scaled", withStd=True, withMean=False)
+prep_model = Pipeline(stages=[assembler, scaler]).fit(df_fe)
+
+# cache agar randomSplit
+df_ml = prep_model.transform(df_fe).select("features_scaled", "label").cache()
+print(f"Jumlah fitur: {len(FEATURE_COLS)} -> {FEATURE_COLS}")
+print(f"Baris siap model: {df_ml.count():,}")
+display(df_ml.limit(3).toPandas())
