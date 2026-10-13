@@ -417,3 +417,43 @@ def plot_diagnostics(pred, m, title):
 metrics_base, pred_base = evaluate_model(gbt_model, test_df)
 print_report("GBT baseline (maxIter=75, maxDepth=3)", metrics_base)
 plot_diagnostics(pred_base, metrics_base, "GBT baseline")
+
+"""## 11. Hyperparameter tuning: `ParamGridBuilder` + `CrossValidator` (5-fold)
+
+Artikel (bagian V) menyatakan tuning dilakukan dengan `ParamGridBuilder` dan `CrossValidator`, dan abstraknya menyebut validasi silang 5-fold, tetapi **ruang pencarian tidak dilaporkan**. Saya menentukan grid kecil di sekitar konfigurasi baseline (bagian 2). Pemilihan model memakai AUC-ROC (metrik utama artikel) pada data latih; data uji tidak disentuh sampai evaluasi akhir.
+"""
+
+if RUN_CV:
+    evaluator_auc = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="rawPrediction",
+                                                  metricName="areaUnderROC")
+    gbt_cv = GBTClassifier(featuresCol="features_scaled", labelCol="label", seed=SEED)
+
+    param_grid = (ParamGridBuilder()
+                  .addGrid(gbt_cv.maxDepth, GRID_MAX_DEPTH)
+                  .addGrid(gbt_cv.maxIter, GRID_MAX_ITER)
+                  .build())
+    print(f"{len(param_grid)} kombinasi x {CV_FOLDS}-fold = {len(param_grid) * CV_FOLDS} pelatihan (+1 refit model terbaik)")
+
+    cv = CrossValidator(estimator=gbt_cv, estimatorParamMaps=param_grid, evaluator=evaluator_auc,
+                        numFolds=CV_FOLDS, seed=SEED, parallelism=2)
+
+    t0 = time.perf_counter()
+    cv_model = cv.fit(train_df)
+    timings["cv_fit_s"] = time.perf_counter() - t0
+    print(f"Waktu tuning : {timings['cv_fit_s'] / 60:.1f} menit")
+else:
+    print("RUN_CV = False, tuning dilewati.")
+
+if RUN_CV:
+    rows = []
+    for params, avg_auc in zip(param_grid, cv_model.avgMetrics):
+        row = {p.name: v for p, v in params.items()}
+        row["cv_auc_roc"] = avg_auc
+        rows.append(row)
+    cv_results = pd.DataFrame(rows).sort_values("cv_auc_roc", ascending=False).reset_index(drop=True)
+    display(cv_results.round(4))
+
+    # indeks terbaik yang sama argmax rata-rata metrik antar-fold)
+    best_idx = int(np.argmax(cv_model.avgMetrics))
+    best_params = {p.name: int(v) for p, v in param_grid[best_idx].items()}
+    print("Hiyperparameter terbaik (berdasarkan rata-rata AUC 5-fold):", best_params)
