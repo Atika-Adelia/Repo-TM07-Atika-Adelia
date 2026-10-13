@@ -516,3 +516,18 @@ plt.show()
 print(f"\nUkuran data uji: replikasi = {metrics_base['n']:,} | artikel = {PAPER_TEST_SIZE:,}")
 
 
+"""## 14. Kepentingan fitur
+
+Analisis tambahan (tidak ada pada artikel): `featureImportances` 
+dari model akhir untuk melihat fitur yang paling berpengaruh pada prediksi.
+"""
+
+final_model = best_model
+importances = pd.Series(final_model.featureImportances.toArray(), index=FEATURE_COLS).sort_values()
+
+ax = importances.plot.barh(figsize=(7, 4.3), color="#4c78a8")
+ax.set_xlabel("Feature importance")
+ax.set_title("Kepentingan fitur: GBT model akhir")
+plt.tight_layout()
+plt.show()
+display(importances.sort_values(ascending=False).round(4).to_frame("importance"))
