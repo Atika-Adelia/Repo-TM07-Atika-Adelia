@@ -123,3 +123,42 @@ timings = {}
 print("Spark version       :", spark.version)
 print("Master              :", spark.sparkContext.master)
 print("Default parallelism :", spark.sparkContext.defaultParallelism, "core")
+
+"""## 4. Memuat dataset
+
+Dataset diunduh dari Kaggle dengan `kagglehub`. Jika unduhan otomatis gagal (mis. perlu autentikasi), sel akan meminta Anda mengunggah `cardio_train.csv` secara manual. Berkas memakai pemisah titik koma (`;`).
+
+Kolom (artikel, Tabel 1): `id`, `age` (hari), `gender` (1 = perempuan, 2 = laki-laki), `height` (cm), `weight` (kg), `ap_hi` (tekanan sistolik), `ap_lo` (tekanan diastolik), `cholesterol` (1–3), `gluc` (1–3), `smoke`, `alco`, `active` (biner), dan target `cardio` (0/1).
+"""
+
+def locate_dataset_csv() -> str:
+    try:
+        import kagglehub
+        folder = kagglehub.dataset_download("sulianova/cardiovascular-disease-dataset")
+        hits = glob.glob(os.path.join(folder, "**", "cardio_train.csv"), recursive=True)
+        if not hits:
+            raise FileNotFoundError("cardio_train.csv tidak ditemukan di folder unduhan")
+        return hits[0]
+    except Exception as err:
+        print(f"Unduhan otomatis gagal ({type(err).__name__}: {err})")
+        from google.colab import files
+        uploaded = files.upload()
+        name = next((n for n in uploaded if n.lower().endswith(".csv")), None)
+        if name is None:
+            raise RuntimeError("Tidak ada berkas .csv yang diunggah.")
+        return os.path.abspath(name)
+
+
+CSV_PATH = locate_dataset_csv()
+print("Dataset :", CSV_PATH)
+
+df_raw = spark.read.csv(f"file://{CSV_PATH}", header=True, sep=";", inferSchema=True)
+
+# replikasi parsial pada subset data
+if SAMPLE_FRACTION < 1.0:
+    df_raw = df_raw.sample(withReplacement=False, fraction=SAMPLE_FRACTION, seed=SEED)
+df_raw = df_raw.cache()
+
+n_raw = df_raw.count()
+print(f"Jumlah baris : {n_raw:,}")
+print(f"Jumlah kolom : {len(df_raw.columns)}")
