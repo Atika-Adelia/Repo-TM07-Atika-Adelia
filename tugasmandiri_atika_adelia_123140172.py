@@ -531,3 +531,41 @@ ax.set_title("Kepentingan fitur: GBT model akhir")
 plt.tight_layout()
 plt.show()
 display(importances.sort_values(ascending=False).round(4).to_frame("importance"))
+
+"""## 15. Menyimpan hasil dan menutup sesi
+
+Hasil utama disimpan ke `/content/results` agar tabel dan angka pada laporan dapat dihasilkan ulang dan dilampirkan.
+"""
+
+def to_serializable(m):
+    return None if m is None else {k: (float(v) if isinstance(v, (float, np.floating)) else int(v)) for k, v in m.items()}
+
+
+run_summary = {
+    "environment": {"python": sys.version.split()[0], "pyspark": pyspark.__version__, "spark": spark.version,
+                    "java": java_ver, "cores": spark.sparkContext.defaultParallelism},
+    "config": {"seed": SEED, "sample_fraction": SAMPLE_FRACTION, "outlier_strategy": OUTLIER_STRATEGY,
+               "train_ratio": TRAIN_RATIO, "gbt_base": GBT_BASE, "cv_folds": CV_FOLDS,
+               "grid_max_depth": GRID_MAX_DEPTH, "grid_max_iter": GRID_MAX_ITER, "run_cv": RUN_CV},
+    "data": {"rows_raw": int(n_raw), "duplicates_dropped": int(n_dupes), "rows_clean": int(n_clean),
+             "rows_train": int(n_train), "rows_test": int(n_test)},
+    "best_params": best_params if RUN_CV else None,
+    "metrics_baseline": to_serializable(metrics_base),
+    "metrics_tuned": to_serializable(metrics_tuned),
+    "timings_seconds": {k: round(v, 2) for k, v in timings.items()},
+}
+
+with open(f"{OUTPUT_DIR}/run_summary.json", "w") as f:
+    json.dump(run_summary, f, indent=2)
+comparison.round(4).to_csv(f"{OUTPUT_DIR}/comparison_vs_paper.csv")
+if RUN_CV:
+    cv_results.to_csv(f"{OUTPUT_DIR}/cv_results.csv", index=False)
+
+print("Tersimpan di", OUTPUT_DIR, "->", sorted(os.listdir(OUTPUT_DIR)))
+print("Waktu eksekusi (detik):", {k: round(v, 1) for k, v in timings.items()})
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+spark.stop()
+print("SparkSession dihentikan.")
