@@ -457,3 +457,62 @@ if RUN_CV:
     best_idx = int(np.argmax(cv_model.avgMetrics))
     best_params = {p.name: int(v) for p, v in param_grid[best_idx].items()}
     print("Hiyperparameter terbaik (berdasarkan rata-rata AUC 5-fold):", best_params)
+
+"""## 12. Evaluasi model hasil tuning
+
+Model terbaik dari `CrossValidator` (otomatis di-*refit* pada seluruh data latih) dievaluasi pada data uji yang sama.
+"""
+
+if RUN_CV:
+    best_model = cv_model.bestModel
+    metrics_tuned, pred_tuned = evaluate_model(best_model, test_df)
+    print_report(f"GBT tuned {best_params}", metrics_tuned)
+    plot_diagnostics(pred_tuned, metrics_tuned, "GBT tuned")
+else:
+    best_model, metrics_tuned = gbt_model, None
+    print("Tuning dilewati; model akhir = baseline.")
+
+"""## 13. Perbandingan dengan hasil artikel
+
+Tabel membandingkan hasil replikasi dengan angka GBT pada **Tabel 3 artikel**. Kolom tambahan "Artikel (dihitung ulang dari CM)" memuat metrik yang saya hitung dari *confusion matrix* GBT pada Gambar 7 artikel, karena precision dan recall GBT pada Tabel 3 ternyata tidak cocok dengan *confusion matrix* tersebut (penjelasan di bagian 15.2, butir 2).
+"""
+
+def as_pct_row(m):
+    return {"AUC-ROC (%)": m.get("auc_roc", np.nan) * 100 if m.get("auc_roc") is not None else np.nan,
+            "Accuracy (%)": m["accuracy"] * 100, "Precision (%)": m["precision"] * 100,
+            "Recall (%)": m["recall"] * 100, "F1-score (%)": m["f1"] * 100}
+
+
+paper_from_cm = metrics_from_cm(np.array([[PAPER_GBT_CM["tn"], PAPER_GBT_CM["fp"]],
+                                          [PAPER_GBT_CM["fn"], PAPER_GBT_CM["tp"]]]))
+paper_from_cm["auc_roc"] = None
+
+comparison = pd.DataFrame({
+    "Artikel": PAPER_GBT_TABLE3,
+    "Artikel (dihitung ulang dari CM)": as_pct_row(paper_from_cm),
+    "Replikasi: GBT baseline": as_pct_row(metrics_base),
+})
+if metrics_tuned is not None:
+    comparison["Replikasi: GBT tuned"] = as_pct_row(metrics_tuned)
+
+comparison["Selisih baseline - artikel"] = comparison["Replikasi: GBT baseline"] - comparison["Artikel"]
+display(comparison.round(2))
+
+# Visualisasi Grafik
+plot_cols = [c for c in ["Artikel", "Replikasi: GBT baseline", "Replikasi: GBT tuned"] if c in comparison]
+x = np.arange(len(comparison.index))
+w = 0.8 / len(plot_cols)
+fig, ax = plt.subplots(figsize=(10, 4.3))
+for i, col in enumerate(plot_cols):
+    bars = ax.bar(x + i * w - 0.4 + w / 2, comparison[col], w, label=col)
+    ax.bar_label(bars, fmt="%.1f", fontsize=8, padding=2)
+ax.set_xticks(x); ax.set_xticklabels(comparison.index)
+ax.set_ylabel("Nilai (%)"); ax.set_ylim(50, 90)
+ax.set_title("GBT: artikel vs replikasi (data uji)")
+ax.legend(loc="upper right", fontsize=8)
+plt.tight_layout()
+plt.show()
+
+print(f"\nUkuran data uji: replikasi = {metrics_base['n']:,} | artikel = {PAPER_TEST_SIZE:,}")
+
+
