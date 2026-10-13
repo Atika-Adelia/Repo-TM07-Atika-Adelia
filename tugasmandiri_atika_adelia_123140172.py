@@ -72,3 +72,54 @@ import numpy, pandas, matplotlib, sklearn, pyspark
 
 java_ver = subprocess.run(["java", "-version"], capture_output=True, text=True).stderr.splitlines()[0]
 print(f"PySpark      : {pyspark.__version__}")
+
+figurasi Parameter
+SEED = 42
+
+# Splitting Data
+SAMPLE_FRACTION = 1.0
+TRAIN_RATIO, TEST_RATIO = 0.7, 0.3
+OUTLIER_STRATEGY = "median"
+
+# Model Base Line
+GBT_BASE = dict(maxIter=75, maxDepth=3)
+
+# Tuning (Artikel Memakai ParamGridBuilder + CrossValidator, 5-fold)
+RUN_CV = True
+CV_FOLDS = 5
+# Asumsi nilai baseline = 5
+GRID_MAX_DEPTH = [3, 5, 7]
+# Asumsi nilai baseline = 75
+GRID_MAX_ITER = [50, 75]
+
+# Penilaian Pembanding
+PAPER_GBT_TABLE3 = {
+    "AUC-ROC (%)": 80.02, "Accuracy (%)": 73.20, "Precision (%)": 76.79,
+    "Recall (%)": 66.10, "F1-score (%)": 71.05,
+}
+PAPER_GBT_CM = dict(tn=5237, fp=1660, fn=2012, tp=4794)
+PAPER_TEST_SIZE = sum(PAPER_GBT_CM.values())
+
+OUTPUT_DIR = "/content/results"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+"""## 3. Inisialisasi SparkSession (mode lokal)
+
+Spark dijalankan dengan `local[*]`: seluruh *executor* berjalan di dalam satu mesin Colab. Ini sesuai skema replikasi parsial (mode lokal), tetapi artinya eksperimen ini **tidak** menguji skalabilitas klaster.
+"""
+
+spark = (SparkSession.builder
+         .master("local[*]")
+         .appName("Replikasi-GBT-Cardiovascular")
+         .config("spark.driver.memory", "4g")
+         .config("spark.sql.shuffle.partitions", "8")
+         .config("spark.sql.ansi.enabled", "false")
+         .config("spark.ui.showConsoleProgress", "false")
+         .getOrCreate())
+spark.sparkContext.setLogLevel("ERROR")
+
+# Catatan waktu eksekusi
+timings = {}
+print("Spark version       :", spark.version)
+print("Master              :", spark.sparkContext.master)
+print("Default parallelism :", spark.sparkContext.defaultParallelism, "core")
