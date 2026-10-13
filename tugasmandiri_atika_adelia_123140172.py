@@ -294,3 +294,22 @@ df_ml = prep_model.transform(df_fe).select("features_scaled", "label").cache()
 print(f"Jumlah fitur: {len(FEATURE_COLS)} -> {FEATURE_COLS}")
 print(f"Baris siap model: {df_ml.count():,}")
 display(df_ml.limit(3).toPandas())
+
+"""## 8. Pembagian data latih dan uji
+
+Pembagian 70% / 30% dengan `randomSplit` (artikel menyebut rasio ini, tetapi tidak 
+menyebut *seed*; saya memakai `SEED` tetap agar hasil dapat diulang).
+"""
+
+train_df, test_df = df_ml.randomSplit([TRAIN_RATIO, TEST_RATIO], seed=SEED)
+train_df, test_df = train_df.cache(), test_df.cache()
+n_train, n_test = train_df.count(), test_df.count()
+
+print(f"Data latih : {n_train:,} baris ({n_train / (n_train + n_test):.1%})")
+print(f"Data uji   : {n_test:,} baris ({n_test / (n_train + n_test):.1%})")
+print(f"Pada artikel, ukuran data uji (jumlah confusion matrix) = {PAPER_TEST_SIZE:,}")
+
+dist = pd.concat({"latih": train_df.groupBy("label").count().toPandas().set_index("label")["count"],
+                  "uji": test_df.groupBy("label").count().toPandas().set_index("label")["count"]}, axis=1)
+print("\nDistribusi kelas per subset:")
+display(dist)
