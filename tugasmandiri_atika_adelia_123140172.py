@@ -162,3 +162,41 @@ df_raw = df_raw.cache()
 n_raw = df_raw.count()
 print(f"Jumlah baris : {n_raw:,}")
 print(f"Jumlah kolom : {len(df_raw.columns)}")
+
+"""## 5. Eksplorasi data (EDA)
+
+Tujuan EDA di sini terbatas: memeriksa skema, nilai kosong, rentang nilai (untuk menentukan aturan pembersihan), dan keseimbangan kelas target.
+"""
+
+# 5.1 Skema dan contoh data
+df_raw.printSchema()
+display(df_raw.limit(5).toPandas())
+
+# 5.2 Nilai kosong per kolom
+null_counts = df_raw.select([F.sum(F.col(c).isNull().cast("int")).alias(c) for c in df_raw.columns]).toPandas()
+print("Jumlah nilai kosong per kolom:")
+display(null_counts)
+
+# 5.3 Rentang nilai variabel numerik: min / kuartil / maks
+# (nilai ekstrem pada height, weight, ap_hi, ap_lo menjadi dasar aturan pembersihan)
+num_cols = ["age", "height", "weight", "ap_hi", "ap_lo"]
+display(df_raw.select(num_cols).summary("min", "25%", "50%", "75%", "max").toPandas())
+
+# 5.4 Domain nilai variabel kategorikal / biner
+for c in ["gender", "cholesterol", "gluc", "smoke", "alco", "active", "cardio"]:
+    vals = sorted(r[0] for r in df_raw.select(c).distinct().collect())
+    print(f"{c:12s}: {vals}")
+
+# 5.5 Distribusi kelas target
+class_pdf = df_raw.groupBy("cardio").count().orderBy("cardio").toPandas()
+print(class_pdf.to_string(index=False))
+print("\nPada Artikel: cardio=1 berjumlah 34.979 baris, cardio=0 berjumlah 35.021 baris.")
+
+ax = class_pdf.plot.bar(x="cardio", y="count", legend=False, rot=0,
+                        color=["#5fa06a", "#a3c96f"], figsize=(5, 3.5))
+ax.set_xlabel("Presence of cardiovascular disease (cardio)")
+ax.set_ylabel("count")
+ax.set_title("Distribusi kelas target")
+
+plt.tight_layout()
+plt.show()
